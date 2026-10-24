@@ -63,15 +63,17 @@ int wmain(int argc, wchar_t** argv) {
         return 0;
     }
     catch (std::exception& e) {
-        if (resultFile != INVALID_HANDLE_VALUE) {
-            report({ {"protocol", 1}, {"ok", false}, {"stage", "initialize"}, {"message", e.what()} });
+        if (argc != 1) {
+            if (resultFile != INVALID_HANDLE_VALUE)
+                report({ {"protocol", 1}, {"ok", false}, {"stage", "initialize"}, {"errorCode", 0}, {"message", e.what()} });
             return 1;
         }
         MulNX::ErrorTerminate("在启动时发生异常！异常描述：" + std::string(e.what()));
     }
     catch (...) {
-        if (resultFile != INVALID_HANDLE_VALUE) {
-            report({ {"protocol", 1}, {"ok", false}, {"stage", "initialize"}, {"message", "未知启动异常"} });
+        if (argc != 1) {
+            if (resultFile != INVALID_HANDLE_VALUE)
+                report({ {"protocol", 1}, {"ok", false}, {"stage", "initialize"}, {"errorCode", 0}, {"message", "未知启动异常"} });
             return 1;
         }
         MulNX::ErrorTerminate("在启动时发生未知异常！");
