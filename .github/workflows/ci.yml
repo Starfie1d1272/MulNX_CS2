@@ -44,14 +44,13 @@ jobs:
       # 6. 上传构建产物（仅当推送的是标签或 main 分支）
       #    包含 Output 目录、MulNX.7z 和 MulNX 原始目录
       - name: Upload artifacts
-        if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: build-outputs-${{ github.sha }}
           path: |
-            u8测试/bin/Output/
-            u8测试/bin/MulNX.7z
-            u8测试/bin/MulNX/
+            u8测试/bin/MulNX/CS2Injector/CS2Injector.exe
+            u8测试/bin/MulNX/CS2Injector/launch-protocol.txt
           if-no-files-found: warn
 
       # 7. 如果是标签推送，准备 Release 信息（包含时间戳和标签消息）
