@@ -33,38 +33,35 @@ bool CS2HelperController::Init() {
     return true;
 }
 
-void CS2HelperController::DoInject(PROCESS_INFORMATION& pi,
+bool CS2HelperController::DoInject(PROCESS_INFORMATION& pi,
     const fs::path& dllPath) {
     bool helperInjected = this->pInjectHelper->InjectDll(pi.hProcess, dllPath.wstring());
     if (!helperInjected) {
-        TerminateProcess(pi.hProcess, 0);  // 注入失败则终止进程
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-        MulNX::ErrorTerminate(std::format("Dll Load Failed : {}", dllPath.string()));
+        auto code = GetLastError();
+        this->LogError(std::format("Dll Load Failed : {}", dllPath.string()));
+        SetLastError(code);
     }
+    return helperInjected;
 }
 
 bool CS2HelperController::Remoting(PROCESS_INFORMATION& pi) {
     // Reshade注入
     auto reshadedll = this->dirTools / "reshade" / "dxgi.dll";
     if (fs::exists(reshadedll) && this->injectReshade) {
-        this->DoInject(pi, reshadedll);
+        if (!this->DoInject(pi, reshadedll))return false;
     }
     // ffmpeg注入
     for (const auto& ffmpegDll : this->ffmpegsDll) {
         auto fullPath = this->dirFFmpeg / ffmpegDll;
         // 在自己进程加载Dll，这里千万不要删掉，不然算不出地址，没办法远程初始化了
         LoadLibraryW(fullPath.wstring().c_str());
-        this->DoInject(pi, fullPath);
+        if (!this->DoInject(pi, fullPath))return false;
     }
     // CS2OBTool注入，同样先在自己进程加载Dll
     LoadLibraryW(this->CS2OBToolPath.wstring().c_str());
-    this->DoInject(pi, this->CS2OBToolPath);
+    if (!this->DoInject(pi, this->CS2OBToolPath))return false;
     // 远程初始化CS2OBTool.dll
     if (!this->pInjectHelper->InitDLL(pi.hProcess, L"CS2OBTool.dll", "MulNX_CS2_Start")) {
-        TerminateProcess(pi.hProcess, 0);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
         return false;
     }
     return true;

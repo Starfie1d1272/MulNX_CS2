@@ -75,7 +75,7 @@ bool CS2BootLoader::Init() {
 #ifdef _DEBUG
     autoLaunch = true;
 #endif
-    if (autoLaunch) {
+    if (autoLaunch && !this->externalLaunch) {
         this->PublishAsync("CS2BootLoader/Launch"_hash);
     }
     
@@ -119,16 +119,15 @@ void CS2BootLoader::ProcessMsg(MulNX::Message& msg) {
 bool CS2BootLoader::CheckEnvironment() {
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnapshot == INVALID_HANDLE_VALUE) {
-        this->LogError(std::format("无法创建进程快照. Error: {}", GetLastError()));
-        return false;
+        return this->Fail("environment", GetLastError(), "无法创建进程快照");
     }
     PROCESSENTRY32W pe32;
     pe32.dwSize = sizeof(pe32);
 
     if (!Process32FirstW(hSnapshot, &pe32)) {
-        this->LogError(std::format("Process32First失败，Error: {}", GetLastError()));
+        auto code = GetLastError();
         CloseHandle(hSnapshot);
-        return false;
+        return this->Fail("environment", code, "Process32First失败");
     }
 
     do {
@@ -137,34 +136,51 @@ bool CS2BootLoader::CheckEnvironment() {
 
         for (const auto& pattern : patternsCheckDangerous) {
             if (exeNameUtf8.find(pattern) != std::string::npos) {
-                this->LogError("为防止反作弊冲突，请先自行检验环境，关闭可能冲突的软件后再使用");
                 CloseHandle(hSnapshot);
-                return false;
+                this->launchResult["conflictPid"] = pe32.th32ProcessID;
+                this->launchResult["conflictProcess"] = exeNameUtf8;
+                return this->Fail("environment", 0, "请先关闭冲突程序：" + exeNameUtf8);
             }
         }
     } while (Process32NextW(hSnapshot, &pe32));
 
+    auto code = GetLastError();
     CloseHandle(hSnapshot);
+    if (code != ERROR_NO_MORE_FILES)
+        return this->Fail("environment", code, "进程枚举未完成");
     return true;
 }
 
+bool CS2BootLoader::Fail(const std::string& stage, DWORD code, const std::string& message) {
+    this->launchResult.update({ {"protocol", 1}, {"ok", false}, {"stage", stage},
+        {"errorCode", code}, {"message", message} });
+    this->LogError(std::format("{} (stage={}, error={})", message, stage, code));
+    return false;
+}
+
+nlohmann::json CS2BootLoader::LaunchOnce() {
+    std::unique_lock lock(this->smutex);
+    this->LaunchAndInject();
+    return this->launchResult;
+}
+
 bool CS2BootLoader::LaunchAndInject() {
+    this->launchResult = nlohmann::json::object();
+    // Every launch path, including auto.yaml and external callers, rechecks.
+    if (!this->CheckEnvironment())return false;
     // 验证游戏路径
     if (gamePath.empty() || !fs::exists(gamePath)) {
-        this->LogError(std::format("无效CS2路径: {}", gamePath.string()));
-        return false;
+        return this->Fail("path", 0, std::format("无效CS2路径: {}", gamePath.string()));
     }
 
     if (gamePath.filename() != "cs2.exe") {
-        this->LogError(std::format("指定的游戏路径不指向cs2.exe: {}", gamePath.string()));
-        return false;
+        return this->Fail("path", 0, "指定的游戏路径不指向cs2.exe");
     }
 
     // 检查游戏是否已在运行
     HWND hwnd = FindWindowW(nullptr, L"Counter-Strike 2");
     if (hwnd != nullptr) {
-        this->LogError(std::format("CS2 已在运行，请先关闭游戏: {}", gamePath.string()));
-        return false;
+        return this->Fail("process", 0, "CS2 已在运行，请先关闭游戏");
     }
 
     // 构建命令行参数
@@ -184,14 +200,37 @@ bool CS2BootLoader::LaunchAndInject() {
         &si, &pi
     );
     if (!ok) {
-        this->LogError(std::format("创建CS2进程失败. Error: {}", GetLastError()));
-        return false;
+        return this->Fail("create", GetLastError(), "创建CS2进程失败");
     }
 
-    if (!this->pHelperController->Remoting(pi))return false;
+    if (!this->pHelperController->Remoting(pi)) {
+        auto code = GetLastError();
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return this->Fail("load", code, "CS2工具初始化失败");
+    }
+
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(pi.hProcess, &created, &exited, &kernel, &user)) {
+        auto code = GetLastError();
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return this->Fail("identity", code, "读取CS2创建时间失败");
+    }
 
     // 恢复游戏主线程
-    ResumeThread(pi.hThread);
+    if (ResumeThread(pi.hThread) == static_cast<DWORD>(-1)) {
+        auto code = GetLastError();
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return this->Fail("resume", code, "恢复CS2主线程失败");
+    }
+    auto creation = (static_cast<uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+    this->launchResult = { {"protocol", 1}, {"ok", true}, {"stage", "resumed"},
+        {"pid", pi.dwProcessId}, {"created", std::to_string(creation)} };
 
     // 清理句柄
     CloseHandle(pi.hThread);
