@@ -44,7 +44,7 @@ jobs:
       # 6. 上传构建产物（仅当推送的是标签或 main 分支）
       #    包含 Output 目录、MulNX.7z 和 MulNX 原始目录
       - name: Upload artifacts
-        if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: build-outputs-${{ github.sha }}
