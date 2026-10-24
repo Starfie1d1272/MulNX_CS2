@@ -1,6 +1,5 @@
 #pragma once
 #include <MulNX/MulNX.hpp>
-#include <nlohmann/json.hpp>
 
 class CS2BootLoader final : public MulNX::Module<CS2BootLoader> {
     class CS2HelperController* pHelperController = nullptr;
@@ -10,8 +9,7 @@ class CS2BootLoader final : public MulNX::Module<CS2BootLoader> {
 
     std::vector<std::string> patternsCheckDangerous;
     bool environmentChecked = false;
-    nlohmann::json launchResult;
-    bool Fail(const std::string& stage, DWORD code, const std::string& message);
+    std::function<void(const PROCESS_INFORMATION&)> onProcessCreated;
     bool CheckEnvironment();
     bool LaunchAndInject();
 
@@ -19,7 +17,8 @@ class CS2BootLoader final : public MulNX::Module<CS2BootLoader> {
     void ProcessMsg(MulNX::Message& msg);
     bool Init()override;
 public:
-    // Set before core initialization; prevents auto.yaml from launching twice.
+    // Only the explicit non-interactive entry uses these; auto.yaml and UI
+    // launches keep their original behavior.
     bool externalLaunch = false;
-    nlohmann::json LaunchOnce();
+    bool LaunchChecked(std::atomic<const char*>& stage, std::function<void(const PROCESS_INFORMATION&)> created);
 };

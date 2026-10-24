@@ -10,7 +10,7 @@ class CS2HelperController final :public MulNX::Module<CS2HelperController> {
     std::vector<std::string> ffmpegsDll{};
     std::atomic<bool> injectReshade = true;
     bool Init()override;
-    bool DoInject(PROCESS_INFORMATION& pi, const fs::path& dllPath);
+    void DoInject(PROCESS_INFORMATION& pi, const fs::path& dllPath);
 public:
     bool Remoting(PROCESS_INFORMATION& pi);
 };

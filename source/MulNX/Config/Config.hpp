@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <source_location>
+#include <functional>
 
 class MulNXInfo {
 public:
@@ -16,6 +17,9 @@ public:
 };
 
 namespace MulNX {
+    // Optional process-local fatal sink for non-interactive hosts. If absent
+    // (or if it returns), preserve the normal error dialog and termination.
+    extern std::function<void(const std::string&)> errorTerminateHandler;
     [[noreturn]] void ErrorTerminate(const std::string& Msg,
         const std::source_location& loc = std::source_location::current());
 }
